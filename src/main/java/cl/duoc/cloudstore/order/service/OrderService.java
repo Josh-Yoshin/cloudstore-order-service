@@ -1,40 +1,47 @@
 package cl.duoc.cloudstore.order.service;
 
-import cl.duoc.cloudstore.order.model.CustomerOrder;
+import cl.duoc.cloudstore.order.model.Order;
 import cl.duoc.cloudstore.order.repository.OrderRepository;
-import io.github.resilience4j.circuitbreaker.annotation.CircuitBreaker;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
-import org.springframework.web.client.RestTemplate;
+
+import java.util.List;
+import java.util.Optional;
 
 @Service
 public class OrderService {
-    private final OrderRepository repository;
-    private final RestTemplate restTemplate = new RestTemplate();
 
-    public OrderService(OrderRepository repository) {
-        this.repository = repository;
+    @Autowired
+    private OrderRepository orderRepository;
+
+    public List<Order> getAllOrders() {
+        return orderRepository.findAll();
     }
 
-    @CircuitBreaker(name = "paymentCircuitBreaker", fallbackMethod = "fallbackProcessPayment")
-    public String createAndProcessOrder(Long productId, Double amount) {
-        CustomerOrder order = new CustomerOrder();
-        order.setProductId(productId);
-        order.setAmount(amount);
-        order.setStatus("PROCESSING");
-        repository.save(order);
-
-        String paymentUrl = "http://localhost:8083/api/v1/payments/process";
-        PaymentCallDto dto = new PaymentCallDto(order.getId(), order.getAmount());
-        restTemplate.postForObject(paymentUrl, dto, String.class);
-
-        order.setStatus("CONFIRMED");
-        repository.save(order);
-        return "Orden #" + order.getId() + " aprobada exitosamente.";
+    public Optional<Order> getOrderById(Long id) {
+        return orderRepository.findById(id);
     }
 
-    public String fallbackProcessPayment(Long productId, Double amount, Throwable t) {
-        return "Servicio de pagos con latencia/caído. Orden registrada como PENDIENTE.";
+    public Order saveOrder(Order order) {
+        if (order.getItems() != null) {
+            order.getItems().forEach(item -> item.setOrder(order));
+        }
+        if (order.getStatus() == null) {
+            order.setStatus("PENDIENTE");
+        }
+        return orderRepository.save(order);
+    }
+
+    public Order updateOrder(Long id, Order orderDetails) {
+        return orderRepository.findById(id).map(order -> {
+            order.setCustomerEmail(orderDetails.getCustomerEmail());
+            order.setTotalAmount(orderDetails.getTotalAmount());
+            order.setStatus(orderDetails.getStatus());
+            return orderRepository.save(order);
+        }).orElse(null);
+    }
+
+    public void deleteOrder(Long id) {
+        orderRepository.deleteById(id);
     }
 }
-
-record PaymentCallDto(Long orderId, Double amount) {}
